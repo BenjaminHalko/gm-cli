@@ -31,7 +31,7 @@
     "fix:prettier": "prettier --write . --ignore-path .gitignore --ignore-path .prettierignore",
     "fix": "run-p fix:*",
     "gen:ggbe-api": "node ./src/commands/gxgames/api/gen.ts",
-    "postinstall": "pnpm run build"
+    "prepare": "pnpm run build"
   },
   "devDependencies": {
     "@clack/prompts": "^1.1.0",
