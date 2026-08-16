@@ -61,6 +61,7 @@ export async function useGms2(
     windows: options.toolchainOptions.windows ?? defaults.windows,
     mac: options.toolchainOptions.mac ?? defaults.mac,
     linux: options.toolchainOptions.linux ?? defaults.linux,
+    ios: options.toolchainOptions.ios ?? defaults.ios,
   };
 
   if (
@@ -245,6 +246,13 @@ function getPackageAction(
         extraArgs: [],
       };
     }
+    case "ios": {
+      return {
+        action: "Package",
+        targetFile: outputPath ?? `${defaultBasePath}.ipa`,
+        extraArgs: [],
+      };
+    }
     default:
       throw new KnownError("Target not supported in GM-CLI yet.");
   }
@@ -255,7 +263,7 @@ async function createLocalSettings(
   cache: Cache,
   toolchainOptions: Gms2ToolchainOptions,
 ): Promise<string | undefined> {
-  const localSettings: Record<string, string> = {};
+  const localSettings: Record<string, string | boolean> = {};
   if (toolchainOptions.operagx.emscriptenSdk) {
     localSettings["machine.Platform Settings.operagx.sdk_dir"] =
       toolchainOptions.operagx.emscriptenSdk;
@@ -263,6 +271,10 @@ async function createLocalSettings(
   if (toolchainOptions.windows.visualStudioSdk) {
     localSettings["machine.Platform Settings.Windows.visual_studio_path"] =
       toolchainOptions.windows.visualStudioSdk;
+  }
+  if (toolchainOptions.ios.suppressBuild !== undefined) {
+    localSettings["machine.Platform Settings.iOS.suppress_build"] =
+      toolchainOptions.ios.suppressBuild;
   }
   // add more options here...
 

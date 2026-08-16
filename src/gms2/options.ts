@@ -29,6 +29,9 @@ export interface Gms2ToolchainOptions {
   linux: {
     packageType?: "zip" | "appimage";
   };
+  ios: {
+    suppressBuild?: boolean;
+  };
 }
 
 export function defaultGms2ToolchainOptions(): Gms2ToolchainOptions {
@@ -45,5 +48,6 @@ export function defaultGms2ToolchainOptions(): Gms2ToolchainOptions {
     linux: {
       packageType: "zip",
     },
+    ios: {},
   };
 }

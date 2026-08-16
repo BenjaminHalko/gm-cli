@@ -97,6 +97,15 @@ export const gms2Schema = z
         packageType: z.enum(["zip", "appimage"]),
       })
       .partial(),
+    ios: z
+      .object({
+        suppressBuild: z
+          .boolean()
+          .describe(
+            "Only generate the Xcode project, without building and running on a device",
+          ),
+      })
+      .partial(),
   })
   .partial();
 
