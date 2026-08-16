@@ -61,6 +61,7 @@ export async function useGms2(
     windows: options.toolchainOptions.windows ?? defaults.windows,
     mac: options.toolchainOptions.mac ?? defaults.mac,
     linux: options.toolchainOptions.linux ?? defaults.linux,
+    android: options.toolchainOptions.android ?? defaults.android,
   };
 
   if (
@@ -245,6 +246,14 @@ function getPackageAction(
         extraArgs: [],
       };
     }
+    case "android": {
+      const apk = options.android.packageType === "apk";
+      return {
+        action: "Package",
+        targetFile: outputPath ?? `${defaultBasePath}${apk ? ".apk" : ".aab"}`,
+        extraArgs: [],
+      };
+    }
     default:
       throw new KnownError("Target not supported in GM-CLI yet.");
   }
@@ -263,6 +272,36 @@ async function createLocalSettings(
   if (toolchainOptions.windows.visualStudioSdk) {
     localSettings["machine.Platform Settings.Windows.visual_studio_path"] =
       toolchainOptions.windows.visualStudioSdk;
+  }
+  if (toolchainOptions.android.sdkPath) {
+    localSettings["machine.Platform Settings.Android.Paths.sdk_location"] =
+      toolchainOptions.android.sdkPath;
+  }
+  if (toolchainOptions.android.ndkPath) {
+    localSettings["machine.Platform Settings.Android.Paths.ndk_location"] =
+      toolchainOptions.android.ndkPath;
+  }
+  if (toolchainOptions.android.jdkPath) {
+    localSettings["machine.Platform Settings.Android.Paths.jdk_location"] =
+      toolchainOptions.android.jdkPath;
+  }
+  if (toolchainOptions.android.keystoreFile) {
+    localSettings["machine.Platform Settings.Android.Keystore.filename"] =
+      toolchainOptions.android.keystoreFile;
+  }
+  if (toolchainOptions.android.keystorePassword) {
+    localSettings[
+      "machine.Platform Settings.Android.Keystore.keystore_password"
+    ] = toolchainOptions.android.keystorePassword;
+  }
+  if (toolchainOptions.android.keystoreAlias) {
+    localSettings["machine.Platform Settings.Android.Keystore.alias"] =
+      toolchainOptions.android.keystoreAlias;
+  }
+  if (toolchainOptions.android.keystoreAliasPassword) {
+    localSettings[
+      "machine.Platform Settings.Android.Keystore.keystore_alias_password"
+    ] = toolchainOptions.android.keystoreAliasPassword;
   }
   // add more options here...
 
