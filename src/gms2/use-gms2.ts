@@ -300,7 +300,7 @@ async function createLocalSettings(
   if (toolchainOptions.android.keystorePassword) {
     localSettings[
       "machine.Platform Settings.Android.Keystore.keystore_password"
-    ] = toolchainOptions.android.keystorePassword;
+    ] = encodeBase64(toolchainOptions.android.keystorePassword);
   }
   if (toolchainOptions.android.keystoreAlias) {
     localSettings["machine.Platform Settings.Android.Keystore.alias"] =
@@ -309,7 +309,7 @@ async function createLocalSettings(
   if (toolchainOptions.android.keystoreAliasPassword) {
     localSettings[
       "machine.Platform Settings.Android.Keystore.keystore_alias_password"
-    ] = toolchainOptions.android.keystoreAliasPassword;
+    ] = encodeBase64(toolchainOptions.android.keystoreAliasPassword);
   }
   if (toolchainOptions.ios.suppressBuild !== undefined) {
     localSettings["machine.Platform Settings.iOS.suppress_build"] =
@@ -327,6 +327,10 @@ async function createLocalSettings(
     JSON.stringify(localSettings, null, 2) + "\n",
   );
   return userDir;
+}
+
+function encodeBase64(value: string): string {
+  return Buffer.from(value, "utf-8").toString("base64");
 }
 
 // GMAssetCompiler ignores some project options unless the matching feature flag is on.
