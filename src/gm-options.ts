@@ -99,7 +99,7 @@ export const gms2Schema = z
       .partial(),
     android: z
       .object({
-        packageType: z.enum(["apk", "abb"]),
+        packageType: z.enum(["apk", "aab"]),
         sdkPath: z.string().describe("Path to the Android SDK directory"),
         ndkPath: z.string().describe("Path to the Android NDK directory"),
         jdkPath: z.string().describe("Path to the JDK directory"),

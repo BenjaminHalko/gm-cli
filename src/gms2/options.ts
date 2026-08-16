@@ -30,7 +30,7 @@ export interface Gms2ToolchainOptions {
     packageType?: "zip" | "appimage";
   };
   android: {
-    packageType?: "apk" | "abb";
+    packageType?: "apk" | "aab";
     sdkPath?: string;
     ndkPath?: string;
     jdkPath?: string;
