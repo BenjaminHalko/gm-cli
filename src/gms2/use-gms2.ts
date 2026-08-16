@@ -99,7 +99,12 @@ export async function useGms2(
     `build-gms2-${options.target}-${runtime}`,
   );
 
-  const userDir = await createLocalSettings(ctx, cache, toolchainOptions);
+  const userDir = await createLocalSettings(
+    ctx,
+    cache,
+    toolchainOptions,
+    options.licenseFile,
+  );
 
   let label: string;
   let igorAction: string;
@@ -271,6 +276,7 @@ async function createLocalSettings(
   ctx: Context,
   cache: Cache,
   toolchainOptions: Gms2ToolchainOptions,
+  licenseFile: string,
 ): Promise<string | undefined> {
   const localSettings: Record<string, string | boolean> = {};
   if (toolchainOptions.operagx.emscriptenSdk) {
@@ -297,19 +303,23 @@ async function createLocalSettings(
     localSettings["machine.Platform Settings.Android.Keystore.filename"] =
       toolchainOptions.android.keystoreFile;
   }
-  if (toolchainOptions.android.keystorePassword) {
-    localSettings[
-      "machine.Platform Settings.Android.Keystore.keystore_password"
-    ] = encodeBase64(toolchainOptions.android.keystorePassword);
-  }
   if (toolchainOptions.android.keystoreAlias) {
     localSettings["machine.Platform Settings.Android.Keystore.alias"] =
       toolchainOptions.android.keystoreAlias;
   }
-  if (toolchainOptions.android.keystoreAliasPassword) {
-    localSettings[
-      "machine.Platform Settings.Android.Keystore.keystore_alias_password"
-    ] = encodeBase64(toolchainOptions.android.keystoreAliasPassword);
+  const { keystorePassword, keystoreAliasPassword } = toolchainOptions.android;
+  if (keystorePassword || keystoreAliasPassword) {
+    const email = await readLicenseEmail(ctx, licenseFile);
+    if (keystorePassword) {
+      localSettings[
+        "machine.Platform Settings.Android.Keystore.keystore_password"
+      ] = encryptKeystorePassword(keystorePassword, email);
+    }
+    if (keystoreAliasPassword) {
+      localSettings[
+        "machine.Platform Settings.Android.Keystore.keystore_alias_password"
+      ] = encryptKeystorePassword(keystoreAliasPassword, email);
+    }
   }
   if (toolchainOptions.ios.suppressBuild !== undefined) {
     localSettings["machine.Platform Settings.iOS.suppress_build"] =
@@ -329,8 +339,32 @@ async function createLocalSettings(
   return userDir;
 }
 
-function encodeBase64(value: string): string {
-  return Buffer.from(value, "utf-8").toString("base64");
+// Igor keys the keystore password encryption on the license email.
+async function readLicenseEmail(
+  ctx: Context,
+  licenseFile: string,
+): Promise<string> {
+  const license = await ctx.fs.readFile(licenseFile, "utf-8");
+  const email = /<key>email<\/key>\s*<string>([^<]+)<\/string>/i.exec(
+    license,
+  )?.[1];
+  if (!email) {
+    throw new KnownError(
+      `Found no email in the license file.`,
+    );
+  }
+  return email;
+}
+
+function encryptKeystorePassword(password: string, email: string): string {
+  const salt = Buffer.from(email, "utf-8").toString("hex").toUpperCase();
+  let encrypted = "";
+  for (let i = 0; i < password.length; i++) {
+    encrypted += String.fromCharCode(
+      password.charCodeAt(i) ^ salt.charCodeAt(i % salt.length),
+    );
+  }
+  return Buffer.from(encrypted, "utf-8").toString("base64");
 }
 
 // GMAssetCompiler ignores some project options unless the matching feature flag is on.
