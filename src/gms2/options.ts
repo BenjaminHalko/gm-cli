@@ -39,6 +39,9 @@ export interface Gms2ToolchainOptions {
     keystoreAlias?: string;
     keystoreAliasPassword?: string;
   };
+  ios: {
+    suppressBuild?: boolean;
+  };
 }
 
 export function defaultGms2ToolchainOptions(): Gms2ToolchainOptions {
@@ -58,5 +61,6 @@ export function defaultGms2ToolchainOptions(): Gms2ToolchainOptions {
     android: {
       packageType: "apk",
     },
+    ios: {},
   };
 }
