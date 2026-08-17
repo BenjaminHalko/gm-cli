@@ -38,7 +38,37 @@ import {
 
 const receiptSchema = z.record(z.string(), z.unknown());
 
+// The stock runner only applies YYDisplayLayout (display cutout mode) on
+// Android 14+, even though the underlying APIs exist since Android 11.
+async function patchRunnerCutoutGate(ctx: Context, runtimeLocation: string) {
+  const runnerActivity = ctx.path.join(
+    runtimeLocation,
+    "android",
+    "runner",
+    "ProjectFiles",
+    "src",
+    "main",
+    "java",
+    "YYAndroidPackageDomain",
+    "YYAndroidPackageCompany",
+    "YYAndroidPackageProduct",
+    "RunnerActivity.java",
+  );
+  if (!(await exists(ctx, runnerActivity))) {
+    return;
+  }
+  const source = await ctx.fs.readFile(runnerActivity, "utf-8");
+  const patched = source.replace(
+    /if \(Build\.VERSION\.SDK_INT >= 34\)(\s*_DisplayLayout = SetEdgeToEdge\(\);)/,
+    "if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)$1",
+  );
+  if (patched !== source) {
+    await ctx.fs.writeFile(runnerActivity, patched);
+  }
+}
+
 async function installationFixup(ctx: Context, runtimeLocation: string) {
+  await patchRunnerCutoutGate(ctx, runtimeLocation);
   if (ctx.process.platform === "win32") {
     return;
   }
