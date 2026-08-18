@@ -24,7 +24,7 @@ export interface Gms2ToolchainOptions {
     visualStudioSdk?: string;
   };
   mac: {
-    packageType?: "zip" | "dmg";
+    packageType?: "zip" | "dmg" | "xcodeproj";
   };
   linux: {
     packageType?: "zip" | "appimage";

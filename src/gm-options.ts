@@ -89,7 +89,11 @@ export const gms2Schema = z
       .partial(),
     mac: z
       .object({
-        packageType: z.enum(["zip", "dmg"]),
+        packageType: z
+          .enum(["zip", "dmg", "xcodeproj"])
+          .describe(
+            "'xcodeproj' only generates the Xcode project and packages it as a zip (or copies it to a directory output)",
+          ),
       })
       .partial(),
     linux: z

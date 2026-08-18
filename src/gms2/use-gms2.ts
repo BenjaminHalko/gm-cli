@@ -23,6 +23,7 @@ import { getProjectName, type ProjectPath } from "~/project";
 import type { Target } from "~/target";
 import type { Gms2VersionPartial } from "~/toolchain";
 import { installRuntimeIfNeeded } from "./install-runtime";
+import { exportGeneratedXcodeProject } from "./xcode";
 import {
   defaultGms2ToolchainOptions,
   type Gms2ToolchainOptions,
@@ -98,17 +99,24 @@ export async function useGms2(
     `build-gms2-${options.target}-${runtime}`,
   );
 
+  const exportXcodeProject =
+    options.target === "mac" &&
+    command.type === "package" &&
+    toolchainOptions.mac.packageType === "xcodeproj";
+
   const userDir = await createLocalSettings(
     ctx,
     cache,
     toolchainOptions,
     options.licenseFile,
+    exportXcodeProject,
   );
 
   let label: string;
   let igorAction: string;
   let extraArgs: string[] = [];
   let successMessage: string;
+  let packageTargetFile: string | undefined;
 
   if (command.type === "compile") {
     label = `Compiling for ${options.target}`;
@@ -139,6 +147,7 @@ export async function useGms2(
     igorAction = action;
     extraArgs = ["-tf", targetFile, ...packageArgs];
     successMessage = `Package created: ${targetFile}`;
+    packageTargetFile = targetFile;
   }
 
   const actionLog = ctx.makeTaskLogger(label, {
@@ -176,8 +185,23 @@ export async function useGms2(
       },
     });
   } catch (e) {
-    actionLog.error("Failed");
-    throw new KnownError(e);
+    // The macOS builder has no suppress_build: Igor always runs xcodebuild
+    // after generating the project. When only the project is wanted, a failure
+    // in that final step (e.g. no Xcode on the host) is tolerated.
+    if (!(exportXcodeProject && /xcodebuild/i.test(String(e)))) {
+      actionLog.error("Failed");
+      throw new KnownError(e);
+    }
+  }
+
+  if (exportXcodeProject && packageTargetFile !== undefined) {
+    await exportGeneratedXcodeProject(
+      ctx,
+      actionLog,
+      options.projectPath,
+      "mac",
+      packageTargetFile,
+    );
   }
 
   actionLog.success(successMessage);
@@ -269,8 +293,12 @@ async function createLocalSettings(
   cache: Cache,
   toolchainOptions: Gms2ToolchainOptions,
   licenseFile: string,
+  suppressMacBuild: boolean,
 ): Promise<string | undefined> {
-  const localSettings: Record<string, string> = {};
+  const localSettings: Record<string, string | boolean> = {};
+  if (suppressMacBuild) {
+    localSettings["machine.Platform Settings.macOS.suppress_build"] = true;
+  }
   if (toolchainOptions.operagx.emscriptenSdk) {
     localSettings["machine.Platform Settings.operagx.sdk_dir"] =
       toolchainOptions.operagx.emscriptenSdk;
