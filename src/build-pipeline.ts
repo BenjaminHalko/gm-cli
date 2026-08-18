@@ -94,7 +94,9 @@ export async function runBuildPipeline(
   );
 
   // FIXME: Add full support for all platforms
-  if (!["mac", "windows", "linux", "operagx", "ios"].includes(target)) {
+  if (
+    !["mac", "windows", "linux", "operagx", "android", "ios"].includes(target)
+  ) {
     throw new KnownError(
       `Support for target '${target}' is coming soon to GameMaker CLI.`,
     );
