@@ -85,6 +85,16 @@ export async function useGms2(
     );
   }
 
+  const exportXcodeProject =
+    command.type === "package" &&
+    options.target === "mac" &&
+    toolchainOptions.mac.packageType === "xcode";
+  if (exportXcodeProject && runtime !== "YYC") {
+    throw new KnownError(
+      "Exporting an Xcode project requires the native runtime",
+    );
+  }
+
   const runtimeLog = ctx.makeTaskLogger("Installing runtime");
   const runtimeLocation = await installRuntimeIfNeeded(ctx, runtimeLog, {
     licenseFile: options.licenseFile,
@@ -119,6 +129,10 @@ export async function useGms2(
     label = `Compiling & running for ${options.target}`;
     igorAction = "Run";
     successMessage = "Game exited";
+  } else if (exportXcodeProject) {
+    label = "Generating Xcode project";
+    igorAction = "Run";
+    successMessage = "Xcode project generated";
   } else {
     label = `Packaging for ${options.target}`;
     const projectDir = ctx.path.dirname(options.projectPath);
@@ -181,7 +195,42 @@ export async function useGms2(
     throw new KnownError(e);
   }
 
+  if (exportXcodeProject && command.type === "package") {
+    const xcodeProject = await findXcodeProject(ctx, buildCacheDir);
+    if (!xcodeProject) {
+      throw new KnownError(
+        `Igor finished but no .xcodeproj was found in '${buildCacheDir}'`,
+      );
+    }
+    if (command.outputPath !== undefined) {
+      const dest = ctx.path.resolve(
+        ctx.path.dirname(options.projectPath),
+        command.outputPath,
+      );
+      await ctx.fs.cp(ctx.path.dirname(xcodeProject), dest, {
+        recursive: true,
+      });
+      successMessage = `Xcode project exported: ${ctx.path.join(dest, ctx.path.basename(xcodeProject))}`;
+    } else {
+      successMessage = `Xcode project generated: ${xcodeProject}`;
+    }
+  }
+
   actionLog.success(successMessage);
+}
+
+async function findXcodeProject(
+  ctx: Context,
+  dir: string,
+): Promise<string | undefined> {
+  let entries: string[];
+  try {
+    entries = await ctx.fs.readdir(dir, { recursive: true });
+  } catch {
+    return undefined;
+  }
+  const match = entries.find((entry) => entry.endsWith(".xcodeproj"));
+  return match ? ctx.path.join(dir, match) : undefined;
 }
 
 function getPackageAction(
@@ -286,6 +335,9 @@ async function createLocalSettings(
   if (toolchainOptions.windows.visualStudioSdk) {
     localSettings["machine.Platform Settings.Windows.visual_studio_path"] =
       toolchainOptions.windows.visualStudioSdk;
+  }
+  if (toolchainOptions.mac.packageType === "xcode") {
+    localSettings["machine.Platform Settings.macOS.suppress_build"] = true;
   }
   if (toolchainOptions.android.sdkPath) {
     localSettings["machine.Platform Settings.Android.Paths.sdk_location"] =
