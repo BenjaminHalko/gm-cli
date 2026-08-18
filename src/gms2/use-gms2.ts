@@ -349,9 +349,7 @@ async function readLicenseEmail(
     license,
   )?.[1];
   if (!email) {
-    throw new KnownError(
-      `Found no email in the license file.`,
-    );
+    throw new KnownError(`Found no email in the license file.`);
   }
   return email;
 }

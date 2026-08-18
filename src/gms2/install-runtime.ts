@@ -74,7 +74,6 @@ async function installationFixup(ctx: Context, runtimeLocation: string) {
   }
   const binDir = ctx.path.join(runtimeLocation, "bin");
   await chmodRecursive(ctx, binDir);
-  // Igor runs the android gradle wrapper directly
   const gradlew = ctx.path.join(
     runtimeLocation,
     "android",
