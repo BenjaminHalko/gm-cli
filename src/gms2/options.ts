@@ -40,7 +40,7 @@ export interface Gms2ToolchainOptions {
     keystoreAliasPassword?: string;
   };
   ios: {
-    suppressBuild?: boolean;
+    teamId?: string;
   };
 }
 

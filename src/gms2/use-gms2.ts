@@ -23,6 +23,7 @@ import { getProjectName, type ProjectPath } from "~/project";
 import type { Target } from "~/target";
 import type { Gms2VersionPartial } from "~/toolchain";
 import { installRuntimeIfNeeded } from "./install-runtime";
+import { exportGeneratedXcodeProject } from "./ios";
 import {
   defaultGms2ToolchainOptions,
   type Gms2ToolchainOptions,
@@ -99,17 +100,23 @@ export async function useGms2(
     `build-gms2-${options.target}-${runtime}`,
   );
 
+  // Igor cannot build the .ipa itself: iOS packaging exports the Xcode project.
+  const exportXcodeProject =
+    options.target === "ios" && command.type === "package";
+
   const userDir = await createLocalSettings(
     ctx,
     cache,
     toolchainOptions,
     options.licenseFile,
+    exportXcodeProject,
   );
 
   let label: string;
   let igorAction: string;
   let extraArgs: string[] = [];
   let successMessage: string;
+  let packageTargetFile: string | undefined;
 
   if (command.type === "compile") {
     label = `Compiling for ${options.target}`;
@@ -140,6 +147,7 @@ export async function useGms2(
     igorAction = action;
     extraArgs = ["-tf", targetFile, ...packageArgs];
     successMessage = `Package created: ${targetFile}`;
+    packageTargetFile = targetFile;
   }
 
   const actionLog = ctx.makeTaskLogger(label, {
@@ -179,6 +187,15 @@ export async function useGms2(
   } catch (e) {
     actionLog.error("Failed");
     throw new KnownError(e);
+  }
+
+  if (exportXcodeProject && packageTargetFile !== undefined) {
+    await exportGeneratedXcodeProject(
+      ctx,
+      actionLog,
+      options.projectPath,
+      packageTargetFile,
+    );
   }
 
   actionLog.success(successMessage);
@@ -263,7 +280,7 @@ function getPackageAction(
     case "ios": {
       return {
         action: "Package",
-        targetFile: outputPath ?? `${defaultBasePath}.ipa`,
+        targetFile: outputPath ?? `${defaultBasePath}.zip`,
         extraArgs: [],
       };
     }
@@ -277,6 +294,7 @@ async function createLocalSettings(
   cache: Cache,
   toolchainOptions: Gms2ToolchainOptions,
   licenseFile: string,
+  suppressIosBuild: boolean,
 ): Promise<string | undefined> {
   const localSettings: Record<string, string | boolean> = {};
   if (toolchainOptions.operagx.emscriptenSdk) {
@@ -321,9 +339,12 @@ async function createLocalSettings(
       ] = encryptKeystorePassword(keystoreAliasPassword, email);
     }
   }
-  if (toolchainOptions.ios.suppressBuild !== undefined) {
-    localSettings["machine.Platform Settings.iOS.suppress_build"] =
-      toolchainOptions.ios.suppressBuild;
+  if (suppressIosBuild) {
+    localSettings["machine.Platform Settings.iOS.suppress_build"] = true;
+  }
+  if (toolchainOptions.ios.teamId) {
+    localSettings["machine.Platform Settings.iOS.default_team_id"] =
+      toolchainOptions.ios.teamId;
   }
   // add more options here...
 

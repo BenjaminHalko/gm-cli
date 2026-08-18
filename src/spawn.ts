@@ -24,6 +24,7 @@ export function spawnProcess(
   {
     cmd,
     args,
+    cwd,
     onSignal,
     errorLabel,
     verbose = false,
@@ -31,6 +32,7 @@ export function spawnProcess(
   }: {
     cmd: string;
     args: string[];
+    cwd?: string;
     onSignal?: () => void;
     errorLabel: string;
     verbose?: boolean;
@@ -53,6 +55,7 @@ export function spawnProcess(
     const child = ctx.child_process.spawn(cmd, args, {
       stdio: ["inherit", "pipe", "pipe"],
       env,
+      cwd,
     });
 
     const logLines = (data: Buffer) => {

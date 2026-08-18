@@ -115,10 +115,10 @@ export const gms2Schema = z
       .partial(),
     ios: z
       .object({
-        suppressBuild: z
-          .boolean()
+        teamId: z
+          .string()
           .describe(
-            "Only generate the Xcode project, without building and running on a device",
+            "Apple Developer Team ID used by Xcode signing when the project options leave it unset",
           ),
       })
       .partial(),
