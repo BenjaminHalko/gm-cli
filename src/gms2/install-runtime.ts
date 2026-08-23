@@ -67,8 +67,45 @@ async function patchRunnerCutoutGate(ctx: Context, runtimeLocation: string) {
   }
 }
 
+// The stock runner lets GLSurfaceView destroy the EGL context on every pause,
+// forcing a full EGL/shader re-initialisation each time the app returns from
+// the background (part of the multi-second Android resume freeze).
+async function patchRunnerPreserveEglContext(
+  ctx: Context,
+  runtimeLocation: string,
+) {
+  const glSurfaceView = ctx.path.join(
+    runtimeLocation,
+    "android",
+    "runner",
+    "ProjectFiles",
+    "src",
+    "main",
+    "java",
+    "YYAndroidPackageDomain",
+    "YYAndroidPackageCompany",
+    "YYAndroidPackageProduct",
+    "DemoGLSurfaceView.java",
+  );
+  if (!(await exists(ctx, glSurfaceView))) {
+    return;
+  }
+  const source = await ctx.fs.readFile(glSurfaceView, "utf-8");
+  if (source.includes("setPreserveEGLContextOnPause")) {
+    return;
+  }
+  const patched = source.replace(
+    /(super\(context, attrs\);)/,
+    "$1\n\n\t\tsetPreserveEGLContextOnPause(true);",
+  );
+  if (patched !== source) {
+    await ctx.fs.writeFile(glSurfaceView, patched);
+  }
+}
+
 async function installationFixup(ctx: Context, runtimeLocation: string) {
   await patchRunnerCutoutGate(ctx, runtimeLocation);
+  await patchRunnerPreserveEglContext(ctx, runtimeLocation);
   if (ctx.process.platform === "win32") {
     return;
   }

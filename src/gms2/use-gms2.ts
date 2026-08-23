@@ -104,6 +104,14 @@ export async function useGms2(
     target: options.target,
   });
 
+  if (options.target === "android") {
+    await patchAndroidManifestOrientation(
+      ctx,
+      runtimeLocation,
+      options.projectPath,
+    );
+  }
+
   const buildCacheDir = await cache.getSubDirPath(
     ctx,
     `build-gms2-${options.target}-${runtime}`,
@@ -415,6 +423,102 @@ function encryptKeystorePassword(password: string, email: string): string {
     );
   }
   return Buffer.from(encrypted, "utf-8").toString("base64");
+}
+
+// The runtime's manifest template omits android:screenOrientation (the runner
+// only calls setRequestedOrientation once a surface exists), so every resume
+// briefly lays out in the launcher's orientation and rebuilds the surface
+// twice - a multi-second freeze on games with big texture pages. Bake the
+// orientation from the project's Android options into the template so the
+// window comes up correctly oriented before the first layout.
+async function patchAndroidManifestOrientation(
+  ctx: Context,
+  runtimeLocation: string,
+  projectPath: ProjectPath,
+): Promise<void> {
+  const orientation = await readProjectScreenOrientation(ctx, projectPath);
+  if (!orientation) {
+    return;
+  }
+  const manifestPath = ctx.path.join(
+    runtimeLocation,
+    "android",
+    "runner",
+    "ProjectFiles",
+    "src",
+    "main",
+    "AndroidManifest.xml",
+  );
+  let source: string;
+  try {
+    source = await ctx.fs.readFile(manifestPath, "utf-8");
+  } catch {
+    return;
+  }
+  const anchor =
+    '<activity android:name="${YYAndroidPackageName}.RunnerActivity"';
+  if (!source.includes(anchor)) {
+    return;
+  }
+  const escapedAnchor = anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const withoutExisting = source.replace(
+    new RegExp(`(${escapedAnchor}) android:screenOrientation="[^"]*"`),
+    "$1",
+  );
+  const patched = withoutExisting.replace(
+    anchor,
+    `${anchor} android:screenOrientation="${orientation}"`,
+  );
+  if (patched !== source) {
+    await ctx.fs.writeFile(manifestPath, patched);
+  }
+}
+
+async function readProjectScreenOrientation(
+  ctx: Context,
+  projectPath: ProjectPath,
+): Promise<string | undefined> {
+  const optionsPath = ctx.path.join(
+    ctx.path.dirname(projectPath),
+    "options",
+    "android",
+    "options_android.yy",
+  );
+  let parsed: unknown;
+  try {
+    const raw = await ctx.fs.readFile(optionsPath, "utf-8");
+    parsed = JSON.parse(raw.replace(/,(\s*[}\]])/g, "$1"));
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return undefined;
+  }
+  const opts = parsed as Record<string, unknown>;
+  const flag = (key: string) => opts[`option_android_orient_${key}`] === true;
+  const mask =
+    (flag("portrait") ? 1 : 0) |
+    (flag("portrait_flipped") ? 2 : 0) |
+    (flag("landscape") ? 4 : 0) |
+    (flag("landscape_flipped") ? 8 : 0);
+  switch (mask) {
+    case 1:
+      return "portrait";
+    case 2:
+      return "reversePortrait";
+    case 3:
+      return "sensorPortrait";
+    case 4:
+      return "landscape";
+    case 8:
+      return "reverseLandscape";
+    case 12:
+      return "sensorLandscape";
+    case 15:
+      return "fullSensor";
+    default:
+      return undefined;
+  }
 }
 
 // GMAssetCompiler ignores some project options unless the matching feature flag is on.
