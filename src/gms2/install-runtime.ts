@@ -103,9 +103,120 @@ async function patchRunnerPreserveEglContext(
   }
 }
 
+const RUNNER_JAVA_DIR = [
+  "android",
+  "runner",
+  "ProjectFiles",
+  "src",
+  "main",
+  "java",
+  "YYAndroidPackageDomain",
+  "YYAndroidPackageCompany",
+  "YYAndroidPackageProduct",
+];
+
+// On resume, RunnerJNILib.Resume() unconditionally sets g_AndroidResume, which
+// makes the next Process() invalidate every texture handle and re-decompress
+// all texture pages (BZ2) - a multi-second freeze - even though the preserved
+// EGL context still holds them. Resume(int) receives an int from Java that the
+// native code never reads, so this rewrites four arm64 instructions in
+// Java_com_yoyogames_runner_RunnerJNILib_Resume (inside GameMakerM.o of the
+// YYC libyoyo.a) to store that argument into g_AndroidResume instead of the
+// constant 1:
+//   +0x04  str x19,[sp,#0x10]  ->  stp x19,x20,[sp,#0x10]   (save x20 too)
+//   +0x08  mov x29,sp          ->  mov w20,w2               (capture jint arg)
+//   +0x58  mov w9,#1           ->  mov w9,w20               (flag := arg)
+//   +0x9c  ldr x19,[sp,#0x10]  ->  ldp x19,x20,[sp,#0x10]   (restore x20)
+// Java passes 0 on normal resume (skip invalidation) and 1 from the
+// onSurfaceCreated re-create branch when the context was genuinely lost
+// (see patchRunnerContextLossRecovery).
+const RESUME_FLAG_SIGNATURE = [
+  0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0x90000008, 0xaa0003e1, 0xf9400108,
+  0xb9400108, 0x2a0803e0, 0x94000000, 0x90000008, 0x90000001, 0x91000021,
+  0xf9400108, 0xf9400113, 0xf9400268, 0xaa1303e0, 0xf9400d08, 0xd63f0100,
+  0x94000000, 0x94000000, 0x94000000, 0x90000008, 0x52800029, 0x9000000a,
+  0xf9400108, 0xf940014a, 0x9280000b, 0x39000109,
+];
+
+const RESUME_FLAG_REWRITES: readonly [number, number, number][] = [
+  [0x04, 0xf9000bf3, 0xa90153f3],
+  [0x08, 0x910003fd, 0x2a0203f4],
+  [0x58, 0x52800029, 0x2a1403e9],
+  [0x9c, 0xf9400bf3, 0xa94153f3],
+];
+
+async function patchRunnerResumeTextureFlag(
+  ctx: Context,
+  runtimeLocation: string,
+) {
+  const archive = ctx.path.join(
+    runtimeLocation,
+    "yyc",
+    "android",
+    "arm64-v8a",
+    "lib",
+    "libyoyo.a",
+  );
+  if (!(await exists(ctx, archive))) {
+    return;
+  }
+  const data = await ctx.fs.readFile(archive);
+  const signature = Buffer.alloc(RESUME_FLAG_SIGNATURE.length * 4);
+  RESUME_FLAG_SIGNATURE.forEach((word, i) => {
+    signature.writeUInt32LE(word, i * 4);
+  });
+  const base = data.indexOf(signature);
+  if (base === -1 || data.indexOf(signature, base + 1) !== -1) {
+    return;
+  }
+  for (const [offset, expected, replacement] of RESUME_FLAG_REWRITES) {
+    if (data.readUInt32LE(base + offset) !== expected) {
+      return;
+    }
+    data.writeUInt32LE(replacement, base + offset);
+  }
+  await ctx.fs.writeFile(archive, data);
+}
+
+// Companion to patchRunnerResumeTextureFlag: GLSurfaceView calls
+// onSurfaceCreated only when the EGL context was actually (re)created, and the
+// stock re-create branch does nothing. Resume(1) there restores the original
+// full-invalidation behaviour exactly when the context really was lost.
+// Resume() is idempotent (audio unsuspend is state-guarded), and with an
+// unpatched native library the extra call is a no-op behaviour-wise because
+// the argument is ignored there.
+async function patchRunnerContextLossRecovery(
+  ctx: Context,
+  runtimeLocation: string,
+) {
+  for (const file of ["DemoRenderer.java", "DemoRendererGL2.java"]) {
+    const rendererPath = ctx.path.join(
+      runtimeLocation,
+      ...RUNNER_JAVA_DIR,
+      file,
+    );
+    if (!(await exists(ctx, rendererPath))) {
+      continue;
+    }
+    const source = await ctx.fs.readFile(rendererPath, "utf-8");
+    if (source.includes("RunnerJNILib.Resume(1);")) {
+      continue;
+    }
+    const patched = source.replace(
+      /(Log\.i\("yoyo", "onSurfaceCreated\(\) aborted on re-create[^\n]*\n)/,
+      "$1\t    	RunnerJNILib.Resume(1);\n",
+    );
+    if (patched !== source) {
+      await ctx.fs.writeFile(rendererPath, patched);
+    }
+  }
+}
+
 async function installationFixup(ctx: Context, runtimeLocation: string) {
   await patchRunnerCutoutGate(ctx, runtimeLocation);
   await patchRunnerPreserveEglContext(ctx, runtimeLocation);
+  await patchRunnerResumeTextureFlag(ctx, runtimeLocation);
+  await patchRunnerContextLossRecovery(ctx, runtimeLocation);
   if (ctx.process.platform === "win32") {
     return;
   }
