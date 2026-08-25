@@ -115,142 +115,67 @@ const RUNNER_JAVA_DIR = [
   "YYAndroidPackageProduct",
 ];
 
-// Java_com_yoyogames_runner_RunnerJNILib_Resume (in GameMakerM.o of the YYC
-// libyoyo.a) always tears down GPU state: it sets g_AndroidResume, resets
-// currenttargets/currentDepthBuffer to -1 and calls clearRenderBufferStack().
-// The next Process() sees the flag and rebuilds - invalidating every texture
-// handle, which re-decompresses every BZ2 texture page (a multi-second freeze)
-// and frees every entry in g_surfaces. With a preserved EGL context none of
-// that is necessary, but the teardown and the rebuild are a matched pair:
-// skipping only the rebuild leaves the renderer unable to produce a flippable
-// frame, and DemoRenderer.onDrawFrame spins on `while (!canFlip())` forever.
-//
-// Resume(int) receives an int from Java that the native code never reads, so
-// these rewrites make the whole teardown conditional on it - all of it or none
-// of it. Java passes 0 on a normal resume (GPU state left untouched) and 1 from
-// the onSurfaceCreated re-create branch, where the context really was lost and
-// stock behaviour is required (see patchRunnerContextLossRecovery). Because a
-// 0 argument now skips the flag store as well, a late Resume(0) on the UI
-// thread can no longer clobber a Resume(1) already issued by the GL thread.
-//
-// Only instructions without a relocation are rewritten, so linking is
-// unaffected; each architecture keeps its own prologue/epilogue intact.
-interface ResumePatch {
-  readonly abi: string;
-  readonly signature: readonly number[];
-  readonly rewrites: readonly (readonly [number, number, number])[];
-}
-
-const RESUME_PATCHES: readonly ResumePatch[] = [
-  {
-    // arm64: the jint arrives in w2 and is parked in callee-saved w20, then
-    // `cbz w20` jumps clear of the teardown to the trailing log call at +0x88.
-    //   +0x04  str x19,[sp,#0x10] -> stp x19,x20,[sp,#0x10]  (also save x20)
-    //   +0x18  ldr w8,[x8]        -> ldr w0,[x8]             (frees the +0x1c slot)
-    //   +0x1c  mov w0,w8          -> mov w20,w2              (capture jint arg)
-    //   +0x58  mov w9,#1          -> cbz w20,+0x88           (skip teardown)
-    //   +0x6c  strb w9,[x8]       -> strb w20,[x8]           (flag := arg)
-    //   +0x9c  ldr x19,[sp,#0x10] -> ldp x19,x20,[sp,#0x10]  (restore x20)
-    abi: "arm64-v8a",
-    signature: [
-      0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0x90000008, 0xaa0003e1, 0xf9400108,
-      0xb9400108, 0x2a0803e0, 0x94000000, 0x90000008, 0x90000001, 0x91000021,
-      0xf9400108, 0xf9400113, 0xf9400268, 0xaa1303e0, 0xf9400d08, 0xd63f0100,
-      0x94000000, 0x94000000, 0x94000000, 0x90000008, 0x52800029, 0x9000000a,
-      0xf9400108, 0xf940014a, 0x9280000b, 0x39000109,
-    ],
-    rewrites: [
-      [0x04, 0xf9000bf3, 0xa90153f3],
-      [0x18, 0xb9400108, 0xb9400100],
-      [0x1c, 0x2a0803e0, 0x2a0203f4],
-      [0x58, 0x52800029, 0x34000194],
-      [0x6c, 0x39000109, 0x39000114],
-      [0x9c, 0xf9400bf3, 0xa94153f3],
-    ],
-  },
-  {
-    // armv7: the jint arrives in r2 and is parked in r10, which the function's
-    // existing push/pop already preserves, so the prologue keeps working. The
-    // `cmp` occupies the slot that materialised the constant 1, and only
-    // non-flag-setting loads separate it from the branch, so the flags survive
-    // the address setup. Predicating the stores individually is NOT an
-    // option: the trailing `bl clearRenderBufferStack` carries an R_ARM_CALL
-    // relocation and the linker re-encodes that whole word, silently restoring
-    // the AL condition and calling it unconditionally. Branching over the block
-    // leaves the relocated instruction untouched and simply unreachable.
-    // Slots are tight, so the four -1 stores to currenttargets are folded into
-    // two `stm`s (it is 16-byte aligned - the x86_64 build uses movdqa on it).
-    //   +0x04  add r11,sp,#8   -> mov r10,r2        (capture jint arg)
-    //   +0x54  mov r2,#1       -> cmp r10,#0
-    //   +0x64  str r0,[r1]     -> beq +0x88         (skip teardown)
-    //   +0x68  str r0,[r1,#4]  -> strb r10,[r3]     (flag := arg)
-    //   +0x6c  strb r2,[r3]    -> mvn r2,#0
-    //   +0x70  str r0,[r1,#8]  -> stmia r1!,{r0,r2} (currenttargets[0..1])
-    //   +0x74  str r0,[r1,#0c] -> stmia r1,{r0,r2}  (currenttargets[2..3])
-    abi: "armv7",
-    signature: [
-      0xe92d4c10, 0xe28db008, 0xe1a01000, 0xe59f0090, 0xe79f0000, 0xe5900000,
-      0xebfffffe, 0xe59f0084, 0xe79f0000, 0xe5904000, 0xe5940000, 0xe59f1078,
-      0xe590200c, 0xe08f1001, 0xe1a00004, 0xe12fff32, 0xebfffffe, 0xebfffffe,
-      0xebfffffe, 0xe59f105c, 0xe3e00000, 0xe3a02001, 0xe79f1001, 0xe59f3050,
-      0xe79f3003, 0xe5810000, 0xe5810004, 0xe5c32000,
-    ],
-    rewrites: [
-      [0x04, 0xe28db008, 0xe1a0a002],
-      [0x54, 0xe3a02001, 0xe35a0000],
-      [0x64, 0xe5810000, 0x0a000007],
-      [0x68, 0xe5810004, 0xe5c3a000],
-      [0x6c, 0xe5c32000, 0xe3e02000],
-      [0x70, 0xe5810008, 0xe8a10005],
-      [0x74, 0xe581000c, 0xe8810005],
-    ],
-  },
+// On resume, RunnerJNILib.Resume() unconditionally sets g_AndroidResume, which
+// makes the next Process() invalidate every texture handle and re-decompress
+// all texture pages (BZ2) - a multi-second freeze - even though the preserved
+// EGL context still holds them. Resume(int) receives an int from Java that the
+// native code never reads, so this rewrites four arm64 instructions in
+// Java_com_yoyogames_runner_RunnerJNILib_Resume (inside GameMakerM.o of the
+// YYC libyoyo.a) to store that argument into g_AndroidResume instead of the
+// constant 1:
+//   +0x04  str x19,[sp,#0x10]  ->  stp x19,x20,[sp,#0x10]   (save x20 too)
+//   +0x08  mov x29,sp          ->  mov w20,w2               (capture jint arg)
+//   +0x58  mov w9,#1           ->  mov w9,w20               (flag := arg)
+//   +0x9c  ldr x19,[sp,#0x10]  ->  ldp x19,x20,[sp,#0x10]   (restore x20)
+// Java passes 0 on normal resume (skip invalidation) and 1 from the
+// onSurfaceCreated re-create branch when the context was genuinely lost
+// (see patchRunnerContextLossRecovery).
+const RESUME_FLAG_SIGNATURE = [
+  0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0x90000008, 0xaa0003e1, 0xf9400108,
+  0xb9400108, 0x2a0803e0, 0x94000000, 0x90000008, 0x90000001, 0x91000021,
+  0xf9400108, 0xf9400113, 0xf9400268, 0xaa1303e0, 0xf9400d08, 0xd63f0100,
+  0x94000000, 0x94000000, 0x94000000, 0x90000008, 0x52800029, 0x9000000a,
+  0xf9400108, 0xf940014a, 0x9280000b, 0x39000109,
 ];
 
-async function patchResumeArchive(
+const RESUME_FLAG_REWRITES: readonly [number, number, number][] = [
+  [0x04, 0xf9000bf3, 0xa90153f3],
+  [0x08, 0x910003fd, 0x2a0203f4],
+  [0x58, 0x52800029, 0x2a1403e9],
+  [0x9c, 0xf9400bf3, 0xa94153f3],
+];
+
+async function patchRunnerResumeTextureFlag(
   ctx: Context,
-  archive: string,
-  patch: ResumePatch,
+  runtimeLocation: string,
 ) {
+  const archive = ctx.path.join(
+    runtimeLocation,
+    "yyc",
+    "android",
+    "arm64-v8a",
+    "lib",
+    "libyoyo.a",
+  );
   if (!(await exists(ctx, archive))) {
     return;
   }
   const data = await ctx.fs.readFile(archive);
-  const signature = Buffer.alloc(patch.signature.length * 4);
-  patch.signature.forEach((word, i) => {
+  const signature = Buffer.alloc(RESUME_FLAG_SIGNATURE.length * 4);
+  RESUME_FLAG_SIGNATURE.forEach((word, i) => {
     signature.writeUInt32LE(word, i * 4);
   });
   const base = data.indexOf(signature);
   if (base === -1 || data.indexOf(signature, base + 1) !== -1) {
     return;
   }
-  for (const [offset, expected, replacement] of patch.rewrites) {
+  for (const [offset, expected, replacement] of RESUME_FLAG_REWRITES) {
     if (data.readUInt32LE(base + offset) !== expected) {
       return;
     }
     data.writeUInt32LE(replacement, base + offset);
   }
   await ctx.fs.writeFile(archive, data);
-}
-
-async function patchRunnerResumeTextureFlag(
-  ctx: Context,
-  runtimeLocation: string,
-) {
-  for (const patch of RESUME_PATCHES) {
-    await patchResumeArchive(
-      ctx,
-      ctx.path.join(
-        runtimeLocation,
-        "yyc",
-        "android",
-        patch.abi,
-        "lib",
-        "libyoyo.a",
-      ),
-      patch,
-    );
-  }
 }
 
 // Companion to patchRunnerResumeTextureFlag: GLSurfaceView calls
